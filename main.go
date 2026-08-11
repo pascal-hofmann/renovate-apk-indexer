@@ -14,11 +14,11 @@ import (
 	"github.com/hown3d/renovate-apk-indexer/pkg/renovate"
 )
 
-const wolfiIndex = "https://packages.wolfi.dev/os/x86_64/APKINDEX.tar.gz"
+const mainIndex = "https://dl-cdn.alpinelinux.org/{alpineVersion}/main/{architecture}/APKINDEX.tar.gz"
 
 var (
 	updateInterval = flag.Int("update-interval", 4, "update interval of the apk package index in hours")
-	apkIndexUrls   = flag.String("apk-index-url", wolfiIndex, "comma-separated URLs of the apk indexes to get the package information from")
+	apkIndexUrls   = flag.String("apk-index-url", mainIndex, "comma-separated URLs of the apk indexes to get the package information from")
 	logLevel       = new(slog.Level)
 	logOutput      = flag.String("log-output", "text", "representation for logs (text,json)")
 )
@@ -26,12 +26,11 @@ var (
 func main() {
 	flag.TextVar(logLevel, "log-level", slog.LevelInfo, "log level")
 	flag.Parse()
-	var (
-		l       *slog.Logger
-		logOpts = &slog.HandlerOptions{
-			Level: logLevel,
-		}
-	)
+
+	var l *slog.Logger
+	logOpts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
 
 	switch *logOutput {
 	case "json":
@@ -44,12 +43,11 @@ func main() {
 	slog.SetDefault(l)
 
 	urls := strings.Split(*apkIndexUrls, ",")
-
 	apkContext := apk.New(http.DefaultClient, urls)
-	slog.Info("retrieving apk packages", "urls", urls)
-	apkPackages, err := apkContext.GetApkPackages()
-	if err != nil {
-		slog.Error("error getting apk packages", "err", err)
+	apkPackagesPerAlpineVersionAndArchitecture, errors := apkContext.GetApkPackages()
+	if len(errors) != 0 {
+
+		slog.Error("error updating apk packages", "err", errors)
 	}
 
 	ticker := time.NewTicker(time.Duration(*updateInterval) * time.Hour)
@@ -58,12 +56,12 @@ func main() {
 			select {
 			case <-ticker.C:
 				slog.Info("updating apk packages")
-				newPackages, err := apkContext.GetApkPackages()
-				if err != nil {
+				var err error
+				apkPackagesPerAlpineVersionAndArchitecture, errors = apkContext.GetApkPackages()
+				if len(errors) != 0 {
 					slog.Error("error updating apk packages", "err", err)
 					continue
 				}
-				apkPackages = newPackages
 			}
 		}
 	}()
@@ -71,9 +69,29 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/readyz", healthHandler)
 	mux.HandleFunc("/livez", healthHandler)
-	mux.HandleFunc("/{package}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/apk/{alpineVersion}/{architecture}/{package}", apkHandler(apkContext, apkPackagesPerAlpineVersionAndArchitecture))
+
+	slog.Info("serving on :3000")
+	if err := http.ListenAndServe(":3000", mux); err != nil {
+		slog.Error("serving http ", "err", err)
+		os.Exit(1)
+	}
+}
+
+func apkHandler(apkContext apk.Context, apkPackagesPerAlpineVersionAndArchitecture *apk.PackagePerAlpineVersionAndArchitecture) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		alpineVersion := r.PathValue("alpineVersion")
+		architecture := r.PathValue("architecture")
 		packageName := r.PathValue("package")
-		packages, ok := apkPackages[packageName]
+		err := apkContext.AddAlpineVersionAndArchitecture(alpineVersion, architecture)
+		if err != nil {
+			slog.Error("error adding version and architecture", "alpineVersion", alpineVersion, "architectures", architecture, "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, "internal server error")
+			return
+		}
+		//fmt.Printf("%v\n", apkPackagesPerAlpineVersionAndArchitecture)
+		packages, ok := (*apkPackagesPerAlpineVersionAndArchitecture)[alpineVersion][architecture][packageName]
 		if !ok {
 			slog.Debug("package not found", "packageName", packageName)
 			w.WriteHeader(http.StatusNotFound)
@@ -88,12 +106,6 @@ func main() {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, "internal server error")
 		}
-	})
-
-	slog.Info("serving on :3000")
-	if err := http.ListenAndServe(":3000", mux); err != nil {
-		slog.Error("serving http ", "err", err)
-		os.Exit(1)
 	}
 }
 

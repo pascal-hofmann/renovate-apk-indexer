@@ -1,16 +1,16 @@
 # Renovate APK Index Server
 
-This project aims to create a http server for [renovate](https://github.com/renovatebot/renovate) to query apk packages of the [wolfi project](https://github.com/wolfi-dev/os).
+This project aims to create a http server for [renovate](https://github.com/renovatebot/renovate) to query apk packages.
 
 # Usage
 
-For every release a container image is built and stored in the github container registry: `docker run -p 3000:3000 ghcr.io/hown3d/renovate-apk-indexer`
+For every release a container image is built and stored in the github container registry: `docker run -p 3000:3000 ghcr.io/pascal-hofmann/renovate-apk-indexer`
 
 ```
 $ renovate-apk-indexer -help
 Usage of renovate-apk-indexer:
   -apk-index-url string
-        comma-separated URLs of the apk indexes to get the package information from (default "https://packages.wolfi.dev/os/x86_64/APKINDEX.tar.gz")
+        comma-separated URLs of the apk indexes to get the package information from (default "https://dl-cdn.alpinelinux.org/{alpineVersion}/main/{architecture}/APKINDEX.tar.gz")
   -log-level value
         log level (default INFO)
   -log-output string
@@ -22,7 +22,7 @@ Usage of renovate-apk-indexer:
 You can also specify multiple comma seperate indexes for distributions with multiple repositories:
 
 ```
-$ renovate-apk-indexer -apk-index-url=https://dl-cdn.alpinelinux.org/edge/main/aarch64/APKINDEX.tar.gz,https://dl-cdn.alpinelinux.org/edge/community/aarch64/APKINDEX.tar.gz,https://dl-cdn.alpinelinux.org/edge/testing/aarch64/APKINDEX.tar.gz
+$ renovate-apk-indexer -apk-index-url=https://dl-cdn.alpinelinux.org/{alpineVersion}/main/{architecture}/APKINDEX.tar.gz,https://dl-cdn.alpinelinux.org/{alpineVersion}/community/{architecture}/APKINDEX.tar.gz,https://dl-cdn.alpinelinux.org/{alpineVersion}/testing/{architecture}/APKINDEX.tar.gz
 ```
 
 ## Renovate Gitlab example
@@ -32,7 +32,7 @@ Renovate gitlab-job (abbreviated):
 ```yaml
 renovate:
   services:
-    - name: ghcr.io/hown3d/renovate-apk-indexer:v0.1.0
+    - name: ghcr.io/pascal-hofmann/renovate-apk-indexer:v0.1.0
       alias: wolfi-apk
   script:
     - renovate
@@ -44,8 +44,8 @@ Use it in your renovate.json as a custom datasource:
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
-    "wolfi": {
-      "defaultRegistryUrlTemplate": "http://wolfi-apk:3000/{{packageName}}"
+    "renovate-apk-indexer": {
+      "defaultRegistryUrlTemplate": "http://renovate-apk-indexer:3000/{{packageName}}"
     }
   }
 }
@@ -54,7 +54,7 @@ Use it in your renovate.json as a custom datasource:
 Usage in code:
 
 ```bash
-# renovate: datasource=custom.wolfi depName=argo-cd
+# renovate: datasource=custom.renovate-apk-indexer depName=argo-cd
 VERSION=2.13.1-r0
 apk update && apk add argo-cd=$VERSION
 ```
@@ -63,7 +63,7 @@ Renovate should now be able to detect updates for the specified dependency.
 
 ## API
 
-The server provides an endpoint for `/<PACKAGE_NAME>`, which returns the package information of `<PACKAGE_NAME>` in the [format that renovate custom datasources expects](https://docs.renovatebot.com/modules/datasource/custom/)
+The server provides an endpoint `/apk/<ALPINE_VERSION>/<ARCHITECTURE>/<PACKAGE_NAME>`, which returns the package information of `<PACKAGE_NAME>` in the [format that renovate custom datasources expects](https://docs.renovatebot.com/modules/datasource/custom/)
 
 ## APK Index updates
 
